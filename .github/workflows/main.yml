@@ -2,7 +2,7 @@ name: Lunes Auto Login (Every 14 Days)
 
 on:
   schedule:
-    - cron: "0 2 */14 * *"  # 每14天 UTC 02:00（北京时间 10:00）
+    - cron: "0 2 */14 * *"  # 每14天 UTC 02:00（北京10:00）
   workflow_dispatch:
 
 permissions:
@@ -20,14 +20,13 @@ jobs:
       - name: 🐍 Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.12"
 
       - name: 📦 Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y xvfb
           pip install --upgrade pip
           pip install -r requirements.txt
+          playwright install chromium --with-deps
 
       - name: 🚀 Run login script
         env:
@@ -39,28 +38,20 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: op-screenshots
-          path: |
-            screenshots/*.png
+          name: screenshots
+          path: screenshots/*.png
 
-      - name: ⏱️ Commit time.txt to repo
+      - name: ⏱️ Commit time.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          if [ ! -f time.txt ]; then
-            echo "首次生成时间：$(date +'%Y-%m-%d %H:%M:%S')" > time.txt
-          else
-            echo "$(date +'%Y-%m-%d %H:%M:%S')" > time.txt
-          fi
-
+          echo "$(date +'%Y-%m-%d %H:%M:%S')" > time.txt
           git add time.txt
-
           if git diff --cached --quiet; then
-            echo "无变化，无需提交"
+            echo "无变化"
           else
-            git commit -m "⏱️ 更新时间文件: $(date +'%Y-%m-%d %H:%M:%S')"
+            git commit -m "⏱️ $(date +'%Y-%m-%d %H:%M:%S')"
             git push origin HEAD:main
           fi
