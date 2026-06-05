@@ -1,5 +1,5 @@
-"""Lunes Host 自动登录 - nodriver"""
-import os, sys, time, asyncio, requests, shutil
+"""Lunes Host 自动登录 - undetected-chromedriver"""
+import os, sys, time, requests
 
 LOGIN_URL = "https://betadash.lunes.host/login"
 
@@ -34,47 +34,42 @@ def build_accounts():
             })
     return accounts
 
-def find_chrome():
-    for p in ["/usr/bin/chromium-browser", "/usr/bin/chromium", "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable"]:
-        if os.path.exists(p):
-            return p
-    for p in ["/snap/chromium/current/usr/lib/chromium-browser/chrome", "/snap/bin/chromium"]:
-        if os.path.exists(p):
-            return p
-    found = shutil.which("chromium-browser") or shutil.which("chromium") or shutil.which("google-chrome")
-    return found
-
-async def login_one(email, password):
-    import nodriver as uc
+def login_one(email, password):
+    import undetected_chromedriver as uc
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
     
-    chrome_path = find_chrome()
-    print(f"Chrome path: {chrome_path}")
+    options = uc.ChromeOptions()
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-setuid-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--window-size=1920,1080")
     
-    config = uc.Config()
-    config.no_sandbox = True
-    config.headless = True
-    if chrome_path:
-        config.browser_executable_path = chrome_path
-    
-    browser = await uc.start(config)
+    driver = uc.Chrome(options=options, headless=True)
     
     try:
-        page = await browser.get(LOGIN_URL)
-        await asyncio.sleep(5)
+        print(f"Opening login page: {email}")
+        driver.get(LOGIN_URL)
+        time.sleep(5)
         
-        email_input = await page.select("#email", timeout=20000)
-        await email_input.clear_input()
-        await email_input.send_keys(email)
+        # Wait for form
+        WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.CSS_SELECTOR, "#email")))
         
-        pass_input = await page.select("#password", timeout=10000)
-        await pass_input.clear_input()
-        await pass_input.send_keys(password)
+        email_el = driver.find_element(By.CSS_SELECTOR, "#email")
+        email_el.clear()
+        email_el.send_keys(email)
         
+        pass_el = driver.find_element(By.CSS_SELECTOR, "#password")
+        pass_el.clear()
+        pass_el.send_keys(password)
+        
+        # Wait for Turnstile
         print("Waiting for Turnstile...")
         for i in range(30):
-            await asyncio.sleep(2)
+            time.sleep(2)
             try:
-                val = await page.evaluate('document.querySelector("[name=cf-turnstile-response]")?.value || ""')
+                val = driver.execute_script('return document.querySelector("[name=cf-turnstile-response]")?.value || ""')
                 if val:
                     print(f"Turnstile solved! ({i*2}s)")
                     break
@@ -83,17 +78,18 @@ async def login_one(email, password):
         else:
             print("Turnstile timeout, trying submit anyway...")
         
-        btn = await page.select('button[type="submit"]', timeout=5000)
-        await btn.click()
-        await asyncio.sleep(5)
+        # Submit
+        btn = driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
+        btn.click()
+        time.sleep(5)
         
-        url = page.url
+        url = driver.current_url
         if "/login" not in url:
             print(f"Login success: {url}")
             for sid in ["51160", "60685"]:
                 try:
-                    await browser.get(f"https://betadash.lunes.host/servers/{sid}")
-                    await asyncio.sleep(3)
+                    driver.get(f"https://betadash.lunes.host/servers/{sid}")
+                    time.sleep(3)
                     print(f"  Visited server {sid}")
                 except Exception as e:
                     print(f"  Server {sid}: {e}")
@@ -107,9 +103,9 @@ async def login_one(email, password):
         traceback.print_exc()
         return False
     finally:
-        browser.stop()
+        driver.quit()
 
-async def main():
+def main():
     accounts = build_accounts()
     ok, fail = 0, 0
     results = []
@@ -120,7 +116,7 @@ async def main():
         print(f"[{i}/{len(accounts)}] {email}")
         print(f"{'='*50}")
         
-        success = await login_one(email, acc["password"])
+        success = login_one(email, acc["password"])
         if success:
             ok += 1
             results.append(f"OK {email}")
@@ -133,7 +129,7 @@ async def main():
             acc.get("tg_token", ""), acc.get("tg_chat", "")
         )
         if i < len(accounts):
-            await asyncio.sleep(5)
+            time.sleep(5)
     
     summary = f"Lunes 续期: {ok}/{len(accounts)} 成功\n" + "\n".join(results)
     print(f"\n{summary}")
@@ -146,4 +142,4 @@ async def main():
         sys.exit(1)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
