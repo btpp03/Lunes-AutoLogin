@@ -20,19 +20,22 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Google Chrome
-        run: |
-          wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
-          sudo apt-get update
-          sudo apt-get install -y /tmp/chrome.deb || sudo apt-get install -f -y
-
       - name: Install deps
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium --with-deps
 
       - name: Run login
         env:
           ACCOUNTS_BATCH: ${{ secrets.ACCOUNTS_BATCH }}
         run: python login.py
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: "*.png"
 
       - name: Commit timestamp
         if: always()
