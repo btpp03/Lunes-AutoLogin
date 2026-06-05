@@ -1,19 +1,7 @@
-"""Lunes Host 自动登录 - Playwright + inline stealth JS"""
+"""Lunes Host 自动登录 - CloakBrowser + SOCKS proxy"""
 import os, sys, time, requests
 
 LOGIN_URL = "https://betadash.lunes.host/login"
-
-STEALTH_JS = """
-Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3,4,5]});
-Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-window.chrome = {runtime: {}};
-const origQuery = window.navigator.permissions.query;
-window.navigator.permissions.query = (params) =>
-    params.name === 'notifications'
-        ? Promise.resolve({state: Notification.permission})
-        : origQuery(params);
-"""
 
 def tg_send(text, token="", chat_id=""):
     token, chat_id = (token or "").strip(), (chat_id or "").strip()
@@ -47,80 +35,77 @@ def build_accounts():
     return accounts
 
 def login_one(email, password):
-    from playwright.sync_api import sync_playwright
+    from cloakbrowser import launch
     
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-dev-shm-usage",
-            ]
-        )
-        context = browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.6478.114 Safari/537.36",
-            locale="en-US",
-        )
-        context.add_init_script(STEALTH_JS)
-        page = context.new_page()
+    proxy = os.getenv("PROXY_URL", "")
+    print(f"Proxy: {'set' if proxy else 'none'}")
+    
+    kwargs = {
+        "humanize": True,
+        "geoip": True,
+    }
+    if proxy:
+        kwargs["proxy"] = proxy
+    
+    browser = launch(**kwargs)
+    
+    try:
+        page = browser.new_page()
+        print(f"Opening login: {email}")
+        page.goto(LOGIN_URL, timeout=60000)
+        time.sleep(5)
         
-        try:
-            print(f"Opening login: {email}")
-            page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=60000)
-            time.sleep(5)
-            
-            page.wait_for_selector("#email", state="visible", timeout=25000)
-            page.fill("#email", email)
-            page.fill("#password", password)
-            
-            # Wait for Turnstile
-            print("Waiting for Turnstile...")
-            for i in range(25):
-                time.sleep(2)
-                val = page.evaluate('document.querySelector("[name=cf-turnstile-response]")?.value || ""')
-                if val:
-                    print(f"Turnstile solved! ({i*2}s)")
-                    break
-            else:
-                print("Turnstile timeout")
-            
-            page.click('button[type="submit"]')
-            time.sleep(8)
-            
-            url = page.url
-            print(f"URL: {url}")
-            
-            if "/login" not in url:
-                print("Login success!")
-                for sid in ["51160", "60685"]:
-                    try:
-                        page.goto(f"https://betadash.lunes.host/servers/{sid}", timeout=30000)
-                        time.sleep(3)
-                        print(f"  Visited server {sid}")
-                    except Exception as e:
-                        print(f"  Server {sid}: {e}")
+        # Fill form
+        page.wait_for_selector("#email", state="visible", timeout=25000)
+        page.fill("#email", email)
+        page.fill("#password", password)
+        
+        # Wait for Turnstile
+        print("Waiting for Turnstile...")
+        for i in range(30):
+            time.sleep(2)
+            val = page.evaluate('document.querySelector("[name=cf-turnstile-response]")?.value || ""')
+            if val:
+                print(f"Turnstile solved! ({i*2}s)")
+                break
+        else:
+            print("Turnstile timeout")
+        
+        page.click('button[type="submit"]')
+        time.sleep(8)
+        
+        url = page.url
+        print(f"URL: {url}")
+        
+        if "/login" not in url:
+            print("Login success!")
+            for sid in ["51160", "60685"]:
                 try:
-                    page.goto("https://betadash.lunes.host/logout", timeout=15000)
-                except:
-                    pass
-                return True
-            else:
-                try:
-                    flash = page.locator(".flash-message").text_content()
-                    print(f"Error: {flash}")
-                except:
-                    pass
-                page.screenshot(path=f"fail-{int(time.time())}.png")
-                return False
-        except Exception as e:
-            print(f"Error: {e}")
+                    page.goto(f"https://betadash.lunes.host/servers/{sid}", timeout=30000)
+                    time.sleep(3)
+                    print(f"  Visited server {sid}")
+                except Exception as e:
+                    print(f"  Server {sid}: {e}")
+            try:
+                page.goto("https://betadash.lunes.host/logout", timeout=15000)
+            except:
+                pass
+            return True
+        else:
+            try:
+                flash = page.locator(".flash-message").text_content()
+                print(f"Error: {flash}")
+            except:
+                pass
+            page.screenshot(path=f"fail-{int(time.time())}.png")
             return False
-        finally:
-            context.close()
-            browser.close()
+    except Exception as e:
+        print(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+    finally:
+        browser.close()
 
 def main():
     accounts = build_accounts()
